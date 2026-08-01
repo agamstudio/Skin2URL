@@ -34,14 +34,14 @@ window.SKIN2URL_CONFIG = {
 
 ## Usage
 
-1. Drop or select one or more PNG skin files.
-2. Click **Upload**.
-3. Copy each `i.ibb.co` URL.
-4. In the same visit, uploading the same skin again is skipped (content hash). After a refresh, the session map is empty again.
+1. Drop PNG skins anywhere on the page (or click the drop zone the first time).
+2. Upload starts automatically — no Upload button.
+3. Copy each `i.ibb.co` URL from the result cards.
+4. Duplicates in the same visit are skipped silently (no extra cards). After a refresh, the session map resets.
 
 ## Notes
 
-- Prefer standard skin sizes (64×64, 64×32, 128×128, 256×256). Other sizes show a warning but still upload.
+- Prefer standard skin sizes (64×64, 64×32, 128×128, 256×256). Other sizes still upload.
 - ImgBB rate limits apply; keep `maxConcurrent` modest (default `3`).
 - This page does not use `localStorage` / IndexedDB for skin history.
 

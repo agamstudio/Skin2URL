@@ -11,6 +11,10 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <div id="drag-overlay" class="drag-overlay" aria-hidden="true">
+      <p>Drop skins anywhere</p>
+    </div>
+
     <header class="topbar">
       <a class="brand" href="./">Skin2URL</a>
       <p class="tagline">Upload skins · Get URLs · Nothing saved here</p>
@@ -44,27 +48,17 @@
               />
             </svg>
             <p class="dropzone-title">Drop images here</p>
-            <p class="dropzone-sub">or click to choose files · PNG · multiple OK</p>
+            <p class="dropzone-sub">or click to choose · PNG · drop anywhere on the page</p>
           </div>
-          <input
-            id="file-input"
-            type="file"
-            accept="image/png,.png"
-            multiple
-            hidden
-          />
         </div>
 
-        <div id="queue" class="queue hidden" aria-live="polite"></div>
-
-        <div class="actions">
-          <button id="upload-btn" class="btn btn-primary" type="button" disabled>
-            Upload
-          </button>
-          <button id="clear-btn" class="btn btn-ghost" type="button" disabled>
-            Clear
-          </button>
-        </div>
+        <input
+          id="file-input"
+          type="file"
+          accept="image/png,.png"
+          multiple
+          hidden
+        />
 
         <p id="summary" class="summary" aria-live="polite"></p>
         <p id="config-warning" class="config-warning hidden">
@@ -77,7 +71,7 @@
     </main>
 
     <footer class="footer">
-      <span>Session only — refresh clears this page. Copied URLs still work on ImgBB.</span>
+      <span>Session only — refresh clears this page. Copied URLs still work on ImgBB. Drop files anywhere to add more.</span>
     </footer>
 
     <script src="config.js"></script>

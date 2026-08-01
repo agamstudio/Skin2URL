@@ -11,29 +11,22 @@
   /** @type {Map<string, string>} hash -> ImgBB URL (session memory only) */
   const sessionHashes = new Map();
 
-  /** @type {Map<string, QueueEntry>} */
-  const queue = new Map();
-
   /** @type {Map<string, ResultEntry>} */
   const results = new Map();
 
-  let uploading = false;
+  /** @type {Array<{ id: string, file: File, previewUrl: string }>} */
+  let pending = [];
 
-  /**
-   * @typedef {{
-   *   id: string,
-   *   file: File,
-   *   previewUrl: string,
-   *   warn: string | null,
-   * }} QueueEntry
-   */
+  let processing = false;
+  let dragDepth = 0;
+  let hasStarted = false;
 
   /**
    * @typedef {{
    *   id: string,
    *   name: string,
    *   previewUrl: string,
-   *   status: 'pending' | 'uploading' | 'uploaded' | 'duplicate' | 'error',
+   *   status: 'uploading' | 'uploaded' | 'error',
    *   url: string,
    *   error: string,
    * }} ResultEntry
@@ -41,13 +34,12 @@
 
   const els = {
     dropzone: document.getElementById("dropzone"),
+    uploadPanel: document.getElementById("upload-panel"),
     fileInput: document.getElementById("file-input"),
-    queue: document.getElementById("queue"),
-    uploadBtn: document.getElementById("upload-btn"),
-    clearBtn: document.getElementById("clear-btn"),
     summary: document.getElementById("summary"),
     results: document.getElementById("results"),
     configWarning: document.getElementById("config-warning"),
+    dragOverlay: document.getElementById("drag-overlay"),
   };
 
   function getApiKey() {
@@ -64,156 +56,27 @@
     els.configWarning.classList.toggle("hidden", Boolean(getApiKey()));
   }
 
-  function updateActions() {
-    const hasQueue = queue.size > 0;
-    els.uploadBtn.disabled = !hasQueue || uploading || !getApiKey();
-    els.clearBtn.disabled = (!hasQueue && results.size === 0) || uploading;
-  }
-
   function setSummary(text) {
     els.summary.textContent = text || "";
   }
 
-  /**
-   * @param {File} file
-   * @returns {Promise<{ warn: string | null }>}
-   */
-  function inspectPng(file) {
-    return new Promise((resolve) => {
-      const img = new Image();
-      const url = URL.createObjectURL(file);
-      img.onload = () => {
-        const key = `${img.naturalWidth}x${img.naturalHeight}`;
-        URL.revokeObjectURL(url);
-        if (!TYPICAL_SKIN_SIZES.has(key)) {
-          resolve({
-            warn: `Unusual size ${key} (typical: 64×64 / 64×32 / 128×128)`,
-          });
-        } else {
-          resolve({ warn: null });
-        }
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve({ warn: "Could not read image dimensions" });
-      };
-      img.src = url;
-    });
-  }
-
-  /**
-   * @param {FileList | File[]} fileList
-   */
-  async function addFiles(fileList) {
-    const files = Array.from(fileList || []);
-    let skipped = 0;
-
-    for (const file of files) {
-      const isPng =
-        file.type === "image/png" ||
-        file.name.toLowerCase().endsWith(".png");
-      if (!isPng) {
-        skipped += 1;
-        continue;
-      }
-
-      const { warn } = await inspectPng(file);
-      const id = uid();
-      queue.set(id, {
-        id,
-        file,
-        previewUrl: URL.createObjectURL(file),
-        warn,
-      });
-    }
-
-    renderQueue();
-    updateActions();
-
-    if (skipped > 0) {
-      setSummary(
-        `Added ${files.length - skipped} file(s). Skipped ${skipped} non-PNG.`
-      );
-    } else if (files.length > 0) {
-      setSummary(`${queue.size} file(s) ready to upload.`);
-    }
-  }
-
-  function removeFromQueue(id) {
-    const entry = queue.get(id);
-    if (!entry) return;
-    URL.revokeObjectURL(entry.previewUrl);
-    queue.delete(id);
-    renderQueue();
-    updateActions();
-    setSummary(queue.size ? `${queue.size} file(s) ready to upload.` : "");
-  }
-
-  function clearAll() {
-    for (const entry of queue.values()) {
-      URL.revokeObjectURL(entry.previewUrl);
-    }
-    queue.clear();
-
-    for (const entry of results.values()) {
-      if (entry.previewUrl.startsWith("blob:")) {
-        URL.revokeObjectURL(entry.previewUrl);
-      }
-    }
-    results.clear();
-
-    renderQueue();
-    renderResults();
-    setSummary("");
-    updateActions();
-  }
-
-  function renderQueue() {
-    if (queue.size === 0) {
-      els.queue.classList.add("hidden");
-      els.queue.innerHTML = "";
-      return;
-    }
-
-    els.queue.classList.remove("hidden");
-    els.queue.innerHTML = "";
-
-    for (const entry of queue.values()) {
-      const row = document.createElement("div");
-      row.className = "queue-item";
-      row.innerHTML = `
-        <img class="queue-thumb" alt="" />
-        <div class="queue-meta">
-          <div class="queue-name"></div>
-          ${entry.warn ? `<div class="queue-note"></div>` : ""}
-        </div>
-        <button type="button" class="queue-remove" aria-label="Remove">&times;</button>
-      `;
-      row.querySelector("img").src = entry.previewUrl;
-      row.querySelector(".queue-name").textContent = entry.file.name;
-      if (entry.warn) {
-        row.querySelector(".queue-note").textContent = entry.warn;
-      }
-      row.querySelector(".queue-remove").addEventListener("click", (e) => {
-        e.stopPropagation();
-        removeFromQueue(entry.id);
-      });
-      els.queue.appendChild(row);
-    }
+  function hideDropzone() {
+    if (hasStarted) return;
+    hasStarted = true;
+    els.dropzone.classList.add("hidden");
+    els.uploadPanel.classList.add("compact");
   }
 
   function statusLabel(status) {
     switch (status) {
       case "uploaded":
         return "Uploaded";
-      case "duplicate":
-        return "Already uploaded";
       case "error":
         return "Error";
       case "uploading":
         return "Uploading…";
       default:
-        return "Pending";
+        return "";
     }
   }
 
@@ -223,7 +86,6 @@
     for (const entry of results.values()) {
       const card = document.createElement("article");
       card.className = "result-card";
-      card.dataset.id = entry.id;
 
       const hasUrl = Boolean(entry.url);
       card.innerHTML = `
@@ -315,9 +177,13 @@
       throw new Error(`ImgBB returned ${res.status}`);
     }
 
-    const link = data?.data?.image?.url || data?.data?.url || data?.data?.display_url;
+    const link =
+      data?.data?.image?.url || data?.data?.url || data?.data?.display_url;
     if (!res.ok || !data?.success || !link) {
-      const err = data?.error?.message || data?.status_txt || `Upload failed (${res.status})`;
+      const err =
+        data?.error?.message ||
+        data?.status_txt ||
+        `Upload failed (${res.status})`;
       throw new Error(typeof err === "string" ? err : JSON.stringify(err));
     }
 
@@ -332,70 +198,99 @@
    */
   async function mapPool(items, limit, worker) {
     let index = 0;
-    const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
-      while (index < items.length) {
-        const current = items[index++];
-        await worker(current);
+    const runners = Array.from(
+      { length: Math.min(limit, items.length) },
+      async () => {
+        while (index < items.length) {
+          const current = items[index++];
+          await worker(current);
+        }
       }
-    });
+    );
     await Promise.all(runners);
   }
 
-  async function startUpload() {
+  /**
+   * @param {FileList | File[]} fileList
+   */
+  async function ingestFiles(fileList) {
     const apiKey = getApiKey();
-    if (!apiKey || queue.size === 0 || uploading) return;
-
-    uploading = true;
-    updateActions();
-
-    const batch = Array.from(queue.values());
-    queue.clear();
-    renderQueue();
-
-    /** @type {ResultEntry[]} */
-    const batchResults = batch.map((entry) => ({
-      id: entry.id,
-      name: entry.file.name,
-      previewUrl: entry.previewUrl,
-      status: "pending",
-      url: "",
-      error: "",
-      _file: entry.file,
-    }));
-
-    for (const r of batchResults) {
-      results.set(r.id, r);
+    if (!apiKey) {
+      updateConfigWarning();
+      setSummary("Add your ImgBB API key in config.js first.");
+      return;
     }
-    renderResults();
 
-    let uploaded = 0;
-    let skipped = 0;
-    let failed = 0;
+    const files = Array.from(fileList || []).filter(
+      (file) =>
+        file.type === "image/png" || file.name.toLowerCase().endsWith(".png")
+    );
 
+    if (files.length === 0) {
+      setSummary("No PNG files found.");
+      return;
+    }
+
+    hideDropzone();
+
+    for (const file of files) {
+      pending.push({
+        id: uid(),
+        file,
+        previewUrl: URL.createObjectURL(file),
+      });
+    }
+
+    processQueue();
+  }
+
+  async function processQueue() {
+    if (processing) return;
+    processing = true;
+
+    const apiKey = getApiKey();
     const concurrency = Math.max(
       1,
       Number(window.SKIN2URL_CONFIG?.maxConcurrent) || 3
     );
 
-    /** First hash wins within this batch; later same-hash rows wait on the same promise */
-    /** @type {Map<string, Promise<string>>} */
-    const inFlight = new Map();
+    let uploaded = 0;
+    let skipped = 0;
+    let failed = 0;
 
-    setSummary("Uploading…");
+    while (pending.length > 0) {
+      const batch = pending.splice(0, pending.length);
+      setSummary("Uploading…");
 
-    await mapPool(batchResults, concurrency, async (entry) => {
-      entry.status = "uploading";
-      renderResults();
+      /** @type {Map<string, Promise<string>>} */
+      const inFlight = new Map();
 
-      try {
-        const buffer = await entry._file.arrayBuffer();
+      await mapPool(batch, concurrency, async (item) => {
+        let buffer;
+        try {
+          buffer = await item.file.arrayBuffer();
+        } catch (err) {
+          URL.revokeObjectURL(item.previewUrl);
+          failed += 1;
+          const entry = {
+            id: item.id,
+            name: item.file.name,
+            previewUrl: "",
+            status: "error",
+            url: "",
+            error: err?.message || String(err),
+          };
+          results.set(entry.id, entry);
+          renderResults();
+          return;
+        }
+
         const hash = await sha256Hex(buffer);
 
+        // Already uploaded this session — discard, no card
         if (sessionHashes.has(hash)) {
-          entry.status = "duplicate";
-          entry.url = sessionHashes.get(hash);
+          URL.revokeObjectURL(item.previewUrl);
           skipped += 1;
-          renderResults();
           return;
         }
 
@@ -404,7 +299,7 @@
 
         if (!uploadPromise) {
           isLeader = true;
-          uploadPromise = uploadToImgbb(entry._file, apiKey)
+          uploadPromise = uploadToImgbb(item.file, apiKey)
             .then((link) => {
               sessionHashes.set(hash, link);
               return link;
@@ -413,88 +308,121 @@
               inFlight.delete(hash);
             });
           inFlight.set(hash, uploadPromise);
+
+          const entry = {
+            id: item.id,
+            name: item.file.name,
+            previewUrl: item.previewUrl,
+            status: "uploading",
+            url: "",
+            error: "",
+          };
+          results.set(entry.id, entry);
+          renderResults();
+
+          try {
+            const link = await uploadPromise;
+            entry.status = "uploaded";
+            entry.url = link;
+            uploaded += 1;
+          } catch (err) {
+            entry.status = "error";
+            entry.error = err?.message || String(err);
+            failed += 1;
+          }
+          renderResults();
+          return;
         }
 
-        const link = await uploadPromise;
-
-        if (isLeader) {
-          entry.status = "uploaded";
-          entry.url = link;
-          uploaded += 1;
-        } else {
-          entry.status = "duplicate";
-          entry.url = link;
+        // Same hash already uploading in this batch — wait, then discard card
+        try {
+          await uploadPromise;
           skipped += 1;
+        } catch {
+          failed += 1;
         }
-      } catch (err) {
-        entry.status = "error";
-        entry.error = err?.message || String(err);
-        failed += 1;
-      } finally {
-        delete entry._file;
-        renderResults();
-      }
-    });
+        URL.revokeObjectURL(item.previewUrl);
+      });
+    }
 
-    uploading = false;
-    updateActions();
+    processing = false;
+
+    // More files may have arrived while finishing
+    if (pending.length > 0) {
+      processQueue();
+      return;
+    }
 
     const parts = [];
     if (uploaded) parts.push(`Uploaded ${uploaded}`);
     if (skipped) parts.push(`skipped ${skipped} duplicates`);
     if (failed) parts.push(`${failed} failed`);
-    setSummary(parts.length ? parts.join(", ") + "." : "Nothing to upload.");
+    setSummary(
+      parts.length ? parts.join(", ") + "." : "Nothing new to upload."
+    );
   }
 
-  function bindDropzone() {
-    const dz = els.dropzone;
+  function isFileDrag(e) {
+    return Array.from(e.dataTransfer?.types || []).includes("Files");
+  }
 
-    dz.addEventListener("click", () => {
-      if (!uploading) els.fileInput.click();
+  function bindInteractions() {
+    els.dropzone.addEventListener("click", () => {
+      if (!getApiKey()) {
+        updateConfigWarning();
+        return;
+      }
+      els.fileInput.click();
     });
 
-    dz.addEventListener("keydown", (e) => {
+    els.dropzone.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        if (!uploading) els.fileInput.click();
+        els.dropzone.click();
       }
     });
 
     els.fileInput.addEventListener("change", () => {
       if (els.fileInput.files?.length) {
-        addFiles(els.fileInput.files);
+        ingestFiles(els.fileInput.files);
       }
       els.fileInput.value = "";
     });
 
-    ["dragenter", "dragover"].forEach((type) => {
-      dz.addEventListener(type, (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        dz.classList.add("dragover");
-      });
+    window.addEventListener("dragenter", (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      dragDepth += 1;
+      els.dragOverlay.classList.add("active");
+      document.body.classList.add("dragging");
     });
 
-    ["dragleave", "drop"].forEach((type) => {
-      dz.addEventListener(type, (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (type === "dragleave") dz.classList.remove("dragover");
-      });
+    window.addEventListener("dragover", (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
     });
 
-    dz.addEventListener("drop", (e) => {
-      dz.classList.remove("dragover");
-      if (uploading) return;
+    window.addEventListener("dragleave", (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) {
+        els.dragOverlay.classList.remove("active");
+        document.body.classList.remove("dragging");
+      }
+    });
+
+    window.addEventListener("drop", (e) => {
+      e.preventDefault();
+      dragDepth = 0;
+      els.dragOverlay.classList.remove("active");
+      document.body.classList.remove("dragging");
       const files = e.dataTransfer?.files;
-      if (files?.length) addFiles(files);
+      if (files?.length) ingestFiles(files);
     });
   }
 
-  els.uploadBtn.addEventListener("click", () => startUpload());
-  els.clearBtn.addEventListener("click", () => clearAll());
-
-  bindDropzone();
+  bindInteractions();
   updateConfigWarning();
-  updateActions();
 })();
