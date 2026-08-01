@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Skin2URL — Minecraft Skin Upload</title>
+    <meta
+      name="description"
+      content="Upload Minecraft skins and get copyable ImgBB URLs. Multi-file upload with session duplicate detection."
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="./">Skin2URL</a>
+      <p class="tagline">Upload skins · Get URLs · Nothing saved here</p>
+    </header>
+
+    <main class="main">
+      <section id="upload-panel" class="upload-panel" aria-label="Upload skins">
+        <div
+          id="dropzone"
+          class="dropzone"
+          tabindex="0"
+          role="button"
+          aria-label="Drop skin images here or browse"
+        >
+          <div class="dropzone-inner">
+            <svg
+              class="dropzone-icon"
+              viewBox="0 0 64 64"
+              width="72"
+              height="72"
+              aria-hidden="true"
+            >
+              <rect x="8" y="8" width="48" height="48" rx="4" fill="none" stroke="currentColor" stroke-width="3" />
+              <path
+                d="M32 44V22M32 22l-10 10M32 22l10 10"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="3"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <p class="dropzone-title">Drop images here</p>
+            <p class="dropzone-sub">or click to choose files · PNG · multiple OK</p>
+          </div>
+          <input
+            id="file-input"
+            type="file"
+            accept="image/png,.png"
+            multiple
+            hidden
+          />
+        </div>
+
+        <div id="queue" class="queue hidden" aria-live="polite"></div>
+
+        <div class="actions">
+          <button id="upload-btn" class="btn btn-primary" type="button" disabled>
+            Upload
+          </button>
+          <button id="clear-btn" class="btn btn-ghost" type="button" disabled>
+            Clear
+          </button>
+        </div>
+
+        <p id="summary" class="summary" aria-live="polite"></p>
+        <p id="config-warning" class="config-warning hidden">
+          Set your ImgBB API key in <code>config.js</code> before uploading.
+          See the README for setup steps.
+        </p>
+      </section>
+
+      <section id="results" class="results" aria-label="Upload results"></section>
+    </main>
+
+    <footer class="footer">
+      <span>Session only — refresh clears this page. Copied URLs still work on ImgBB.</span>
+    </footer>
+
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
